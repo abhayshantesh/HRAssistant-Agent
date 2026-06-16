@@ -1,323 +1,112 @@
 """
-HR Copilot AI Agent - Streamlit Application
-Main application file with chat interface
+HRAssistant-Agent — Streamlit chat UI.
+
+Run with:  streamlit run app.py
 """
 import streamlit as st
-import os
-from src.employee_lookup import get_employee_lookup
-from src.rag_pipeline import RAGPipeline, get_embeddings_model
-from src.llm_orchestrator import LLMOrchestrator
-from src.utils import init_session_state, add_message, clear_chat_history
+
 import config
+from src.agent import HRAgent
+from src.database import EmployeeDB
+from src.llm import LLMClient, LLMError
+from src.rag import RAGPipeline, load_embeddings
+
+st.set_page_config(page_title=config.PAGE_TITLE, page_icon=config.PAGE_ICON, layout="wide")
 
 
-# Page configuration
-st.set_page_config(
-    page_title=config.PAGE_TITLE,
-    page_icon=config.PAGE_ICON,
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for better UI - Dark Theme
-st.markdown("""
-    <style>
-    /* Dark theme colors */
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #4da6ff;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #b0b0b0;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .stChatMessage {
-        background-color: #2b2b2b;
-        border-radius: 10px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        color: #e0e0e0;
-    }
-    .sidebar-info {
-        background-color: #1e3a4f;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-        color: #e0e0e0;
-    }
-    /* Ensure all text in chat messages is visible */
-    .stChatMessage p, .stChatMessage div, .stChatMessage span {
-        color: #e0e0e0 !important;
-    }
-    /* Style for user and assistant messages */
-    [data-testid="stChatMessageContent"] {
-        color: #e0e0e0 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
+@st.cache_resource(show_spinner="Loading embedding model…")
+def get_embeddings():
+    return load_embeddings()
 
 
-@st.cache_resource
-def get_cached_embeddings():
-    """
-    Get cached embeddings model
-    """
-    return get_embeddings_model()
+@st.cache_resource(show_spinner="Loading employee database…")
+def get_db():
+    return EmployeeDB()
 
 
-def initialize_app():
-    """
-    Initialize application components
-    """
-    init_session_state()
-    
-    # Initialize components (singleton pattern ensures single instance)
-    if 'components_initialized' not in st.session_state:
-        try:
-            # Get cached embeddings
-            embeddings = get_cached_embeddings()
-            
-            # Create new RAG pipeline for this session
-            st.session_state.rag_pipeline = RAGPipeline(embeddings)
-            
-            # Get employee lookup (can be shared)
-            st.session_state.employee_lookup = get_employee_lookup()
-            
-            # Create orchestrator with session-specific RAG pipeline
-            st.session_state.orchestrator = LLMOrchestrator(
-                rag_pipeline=st.session_state.rag_pipeline,
-                employee_lookup=st.session_state.employee_lookup
-            )
-            
-            st.session_state.components_initialized = True
-        except Exception as e:
-            st.error(f"Error initializing components: {e}")
-            st.info("Please make sure you have set up your .env file with GOOGLE_API_KEY")
-            st.stop()
+@st.cache_resource(show_spinner="Indexing HR policy documents…")
+def get_rag():
+    rag = RAGPipeline(get_embeddings())
+    count = rag.index_directory(config.POLICIES_DIR)
+    return rag, count
 
 
-def load_default_policies():
-    """
-    Load default policy documents from policies directory
-    """
-    if not st.session_state.documents_loaded:
-        try:
-            with st.spinner("Loading HR policy documents..."):
-                rag_pipeline = st.session_state.rag_pipeline
-                
-                # Load documents from policies directory
-                documents = rag_pipeline.load_documents_from_directory(config.POLICIES_DIR)
-                
-                if documents:
-                    # Create vector store
-                    rag_pipeline.create_vector_store(documents)
-                    st.session_state.documents_loaded = True
-                    st.sidebar.success(f"✓ Loaded {len(documents)} policy documents")
-                else:
-                    st.sidebar.warning("No policy documents found in policies directory")
-        except Exception as e:
-            st.sidebar.error(f"Error loading policies: {e}")
+def get_agent():
+    rag, _ = get_rag()
+    return HRAgent(llm=LLMClient(), rag=rag, db=get_db())
 
 
-def render_sidebar():
-    """
-    Render sidebar with employee selection and file upload
-    """
-    st.sidebar.markdown("## 👤 Employee Selection")
-    
-    # Get employee IDs
-    employee_lookup = st.session_state.employee_lookup
-    employee_ids = employee_lookup.get_all_employee_ids()
-    
-    if not employee_ids:
-        st.sidebar.error("No employee data found!")
-        return
-    
-    # Employee ID selector
-    selected_emp_id = st.sidebar.selectbox(
-        "Select Your Employee ID",
-        options=[""] + employee_ids,
-        index=0,
-        help="Select your employee ID to get personalized assistance"
+def sidebar(db: EmployeeDB, rag: RAGPipeline, policy_count: int) -> str | None:
+    st.sidebar.header("👤 Employee")
+    employees = db.list_employees()
+    labels = ["(none)"] + [f"{e['EmpID']} — {e['Name']}" for e in employees]
+    choice = st.sidebar.selectbox("Identify yourself for personalized answers", labels)
+    emp_id = None if choice == "(none)" else choice.split(" — ")[0]
+
+    if emp_id:
+        emp = db.get_employee(emp_id)
+        st.sidebar.caption(f"**{emp['Name']}** · {emp['Role']} · {emp['Department']}")
+        bal = db.get_leave_balance(emp_id)
+        c1, c2, c3 = st.sidebar.columns(3)
+        c1.metric("Casual", bal["CasualLeave"])
+        c2.metric("Sick", bal["SickLeave"])
+        c3.metric("Earned", bal["EarnedLeave"])
+
+    st.sidebar.divider()
+    st.sidebar.header("📄 Policy documents")
+    st.sidebar.caption(f"{policy_count} default document(s) indexed.")
+    uploads = st.sidebar.file_uploader(
+        "Add more (.txt / .pdf)", type=["txt", "pdf"], accept_multiple_files=True
     )
-    
-    # Update session state
-    if selected_emp_id != st.session_state.employee_id:
-        st.session_state.employee_id = selected_emp_id if selected_emp_id else None
-        # Clear chat when employee changes
-        clear_chat_history()
-    
-    # Display employee info if selected
-    if st.session_state.employee_id:
-        emp_info = employee_lookup.get_employee_info(st.session_state.employee_id)
-        if emp_info:
-            st.sidebar.markdown("### 📋 Your Information")
-            st.sidebar.markdown(f"""
-            <div class="sidebar-info">
-            <b>Name:</b> {emp_info['Name']}<br>
-            <b>Department:</b> {emp_info['Department']}<br>
-            <b>Role:</b> {emp_info['Role']}<br>
-            <b>Manager:</b> {emp_info['Manager']}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Leave balance
-            leave_info = employee_lookup.get_leave_balance(st.session_state.employee_id)
-            if leave_info:
-                st.sidebar.markdown("### 📅 Leave Balance")
-                col1, col2, col3 = st.sidebar.columns(3)
-                with col1:
-                    st.metric("Casual", leave_info['CasualLeave'])
-                with col2:
-                    st.metric("Sick", leave_info['SickLeave'])
-                with col3:
-                    st.metric("Earned", leave_info['EarnedLeave'])
-    
-    st.sidebar.markdown("---")
-    
-    # Document upload section
-    st.sidebar.markdown("## 📄 Upload Policy Documents")
-    
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload HR Policy PDFs",
-        type=['pdf', 'txt'],
-        accept_multiple_files=True,
-        help="Upload additional HR policy documents"
-    )
-    
-    if uploaded_files:
-        if st.sidebar.button("Process Uploaded Documents"):
-            with st.spinner("Processing documents..."):
-                try:
-                    rag_pipeline = st.session_state.rag_pipeline
-                    
-                    for uploaded_file in uploaded_files:
-                        documents = rag_pipeline.process_uploaded_file(uploaded_file)
-                        if documents:
-                            if rag_pipeline.vector_store is None:
-                                rag_pipeline.create_vector_store(documents)
-                            else:
-                                rag_pipeline.add_documents(documents)
-                    
-                    st.session_state.documents_loaded = True
-                    st.sidebar.success(f"✓ Processed {len(uploaded_files)} document(s)")
-                except Exception as e:
-                    st.sidebar.error(f"Error processing documents: {e}")
-    
-    # Load default policies button
-    if not st.session_state.documents_loaded:
-        if st.sidebar.button("📚 Load Default Policies"):
-            load_default_policies()
-    else:
-        st.sidebar.success("✓ Policy documents loaded")
-    
-    st.sidebar.markdown("---")
-    
-    # Clear chat button
-    if st.sidebar.button("🗑️ Clear Chat History"):
-        clear_chat_history()
+    if uploads and st.sidebar.button("Index uploaded documents"):
+        added = sum(rag.index_uploaded_file(f) for f in uploads)
+        st.sidebar.success(f"Indexed {added} document(s).")
+
+    st.sidebar.divider()
+    if st.sidebar.button("🗑️ Clear chat"):
+        st.session_state.messages = []
         st.rerun()
-    
-    # Info section
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### ℹ️ About")
-    st.sidebar.info(
-        "HR Copilot uses AI to answer your HR policy questions and "
-        "provide personalized employee information. Ask me anything about "
-        "leave policies, benefits, onboarding, or your personal HR data!"
-    )
 
-
-def render_chat_interface():
-    """
-    Render main chat interface
-    """
-    # Header
-    st.markdown('<div class="main-header">👔 HR Copilot AI Agent</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="sub-header">Your intelligent HR assistant for policies and employee information</div>',
-        unsafe_allow_html=True
-    )
-    
-    # Display greeting if no messages
-    if len(st.session_state.messages) == 0:
-        orchestrator = st.session_state.orchestrator
-        greeting = orchestrator.get_greeting(st.session_state.employee_id)
-        
-        with st.chat_message("assistant"):
-            st.markdown(greeting)
-    
-    # Display chat history
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Chat input
-    if prompt := st.chat_input("Ask me anything about HR policies or your employee information..."):
-        # Add user message
-        add_message("user", prompt)
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Generate response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    orchestrator = st.session_state.orchestrator
-                    
-                    # Check if documents are loaded for policy questions
-                    classification = orchestrator.classify_query(prompt)
-                    if classification['needs_policy_data'] and not st.session_state.documents_loaded:
-                        response_text = (
-                            "I notice you're asking about HR policies, but no policy documents "
-                            "have been loaded yet. Please click the '📚 Load Default Policies' "
-                            "button in the sidebar to load the company's HR policy documents."
-                        )
-                    else:
-                        # Generate response
-                        response = orchestrator.generate_response(
-                            query=prompt,
-                            emp_id=st.session_state.employee_id,
-                            conversation_history=st.session_state.messages
-                        )
-                        response_text = response['answer']
-                    
-                    st.markdown(response_text)
-                    add_message("assistant", response_text)
-                
-                except Exception as e:
-                    error_msg = f"I apologize, but I encountered an error: {str(e)}"
-                    st.error(error_msg)
-                    add_message("assistant", error_msg)
+    return emp_id
 
 
 def main():
-    """
-    Main application entry point
-    """
-    # Initialize app
-    initialize_app()
-    
-    # Render sidebar
-    render_sidebar()
-    
-    # Render chat interface
-    render_chat_interface()
-    
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        "<div style='text-align: center; color: #666; font-size: 0.9rem;'>"
-        "HR Copilot AI Agent | Powered by Google Gemini & LangChain"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    st.title("💼 HRAssistant-Agent")
+    st.caption("Ask about HR policies, your leave balance, your team — or all at once.")
+
+    try:
+        agent = get_agent()
+    except LLMError as e:
+        st.error(str(e))
+        st.stop()
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Failed to initialize the app: {e}")
+        st.stop()
+
+    _, policy_count = get_rag()
+    emp_id = sidebar(get_db(), agent.rag, policy_count)
+
+    st.session_state.setdefault("messages", [])
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Ask an HR question…"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking…"):
+                try:
+                    result = agent.answer(prompt, emp_id, st.session_state.messages[:-1])
+                    answer = result["answer"]
+                    st.markdown(answer)
+                    st.caption(f"Route: {result['route']}")
+                except Exception as e:  # noqa: BLE001
+                    answer = f"Sorry, I hit an error: {e}"
+                    st.error(answer)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
 if __name__ == "__main__":

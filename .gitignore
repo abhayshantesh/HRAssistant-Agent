@@ -32,9 +32,8 @@ wheels/
 *.swo
 *~
 
-# Streamlit
-.streamlit/
-!.streamlit/secrets.toml.example
+# Streamlit — ignore only real secrets; keep example + config committed
+.streamlit/secrets.toml
 
 # Vector store
 data/vector_store/

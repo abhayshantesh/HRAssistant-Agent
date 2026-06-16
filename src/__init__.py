@@ -1,3 +1,1 @@
-"""
-HR Copilot AI Agent - Source Package
-"""
+"""HRAssistant-Agent source package."""

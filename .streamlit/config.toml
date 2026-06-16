@@ -6,6 +6,13 @@ primaryColor = "#4da6ff"
 
 [server]
 headless = true
+# Disable the module file-watcher. It tries to introspect every installed
+# package (including transformers' optional torchvision-only image models),
+# which floods startup with harmless ModuleNotFoundError tracebacks.
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false
+
+[logger]
+level = "error"

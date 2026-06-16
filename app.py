@@ -24,19 +24,17 @@ def get_db():
     return EmployeeDB()
 
 
-@st.cache_resource(show_spinner="Indexing HR policy documents…")
+@st.cache_resource(show_spinner="Loading RAG pipeline…")
 def get_rag():
-    rag = RAGPipeline(get_embeddings())
-    count = rag.index_directory(config.POLICIES_DIR)
-    return rag, count
+    # Starts empty — policy documents come from user PDF uploads.
+    return RAGPipeline(get_embeddings())
 
 
 def get_agent():
-    rag, _ = get_rag()
-    return HRAgent(llm=LLMClient(), rag=rag, db=get_db())
+    return HRAgent(llm=LLMClient(), rag=get_rag(), db=get_db())
 
 
-def sidebar(db: EmployeeDB, rag: RAGPipeline, policy_count: int) -> str | None:
+def sidebar(db: EmployeeDB, rag: RAGPipeline) -> str | None:
     st.sidebar.header("👤 Employee")
     employees = db.list_employees()
     labels = ["(none)"] + [f"{e['EmpID']} — {e['Name']}" for e in employees]
@@ -54,13 +52,25 @@ def sidebar(db: EmployeeDB, rag: RAGPipeline, policy_count: int) -> str | None:
 
     st.sidebar.divider()
     st.sidebar.header("📄 Policy documents")
-    st.sidebar.caption(f"{policy_count} default document(s) indexed.")
+    indexed = st.session_state.get("indexed_docs", [])
+    if indexed:
+        st.sidebar.caption("Indexed: " + ", ".join(indexed))
+    else:
+        st.sidebar.caption("No documents indexed yet — upload a PDF to enable policy answers.")
+
     uploads = st.sidebar.file_uploader(
-        "Add more (.txt / .pdf)", type=["txt", "pdf"], accept_multiple_files=True
+        "Upload policy documents (PDF)", type=["pdf"], accept_multiple_files=True
     )
     if uploads and st.sidebar.button("Index uploaded documents"):
-        added = sum(rag.index_uploaded_file(f) for f in uploads)
-        st.sidebar.success(f"Indexed {added} document(s).")
+        with st.spinner("Indexing…"):
+            for f in uploads:
+                if f.name in indexed:
+                    continue
+                if rag.index_uploaded_file(f):
+                    indexed.append(f.name)
+            st.session_state.indexed_docs = indexed
+        st.sidebar.success(f"Indexed {len(indexed)} document(s).")
+        st.rerun()
 
     st.sidebar.divider()
     if st.sidebar.button("🗑️ Clear chat"):
@@ -83,8 +93,7 @@ def main():
         st.error(f"Failed to initialize the app: {e}")
         st.stop()
 
-    _, policy_count = get_rag()
-    emp_id = sidebar(get_db(), agent.rag, policy_count)
+    emp_id = sidebar(get_db(), agent.rag)
 
     st.session_state.setdefault("messages", [])
     for msg in st.session_state.messages:

@@ -10,7 +10,6 @@ session.
 from __future__ import annotations
 
 import logging
-import os
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -48,42 +47,17 @@ class RAGPipeline:
         return self.vector_store is not None
 
     # --- Ingestion ------------------------------------------------------------
-    def index_directory(self, directory: str) -> int:
-        """Load all .txt policy files from a directory and index them.
-
-        Returns the number of source documents indexed.
-        """
-        if not os.path.isdir(directory):
-            logger.warning("Policies directory not found: %s", directory)
-            return 0
-
-        documents: list[Document] = []
-        for filename in sorted(os.listdir(directory)):
-            if not filename.lower().endswith(".txt"):
-                continue
-            path = os.path.join(directory, filename)
-            with open(path, "r", encoding="utf-8") as f:
-                documents.append(
-                    Document(page_content=f.read(), metadata={"source": filename})
-                )
-
-        if documents:
-            self._add(documents)
-        return len(documents)
-
     def index_uploaded_file(self, uploaded_file) -> bool:
-        """Index a Streamlit UploadedFile (.txt or .pdf). Returns success."""
+        """Index a Streamlit-uploaded PDF. Returns True on success."""
         name = uploaded_file.name
-        if name.lower().endswith(".txt"):
-            content = uploaded_file.read().decode("utf-8", errors="ignore")
-        elif name.lower().endswith(".pdf"):
-            from pypdf import PdfReader
-
-            reader = PdfReader(uploaded_file)
-            content = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-        else:
+        if not name.lower().endswith(".pdf"):
             logger.warning("Unsupported file type: %s", name)
             return False
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(uploaded_file)
+        content = "\n\n".join(page.extract_text() or "" for page in reader.pages)
 
         if not content.strip():
             logger.warning("No extractable text in %s", name)

@@ -95,6 +95,12 @@ def main():
 
     emp_id = sidebar(get_db(), agent.rag)
 
+    if not agent.rag.is_ready:
+        st.info(
+            "📄 No policy documents indexed yet. Upload a **PDF** in the sidebar to "
+            "enable policy (RAG) answers. Employee-record questions work without uploads."
+        )
+
     st.session_state.setdefault("messages", [])
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):

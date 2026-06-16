@@ -61,7 +61,6 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM
 # --- Paths --------------------------------------------------------------------
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 EMPLOYEE_DATA_PATH = os.getenv("EMPLOYEE_DATA_PATH", os.path.join(DATA_DIR, "employee_data.csv"))
-POLICIES_DIR = os.getenv("POLICIES_DIR", os.path.join(DATA_DIR, "policies"))
 
 # --- UI -----------------------------------------------------------------------
 PAGE_TITLE = "HR Assistant Agent"

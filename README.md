@@ -66,8 +66,10 @@ copy .env.example .env         # Windows  (cp on macOS/Linux)
 streamlit run app.py
 ```
 
-In the browser: pick an employee (optional, for personalized answers) and start
-asking. Policy documents are indexed automatically on first load.
+In the browser: **upload one or more policy PDFs** in the sidebar to enable
+policy (RAG) answers, then optionally pick an employee for personalized
+record lookups and start asking. Employee-record questions work without any
+upload.
 
 ### Example questions
 
@@ -88,8 +90,7 @@ HRAssistant-Agent/
 ├── requirements.txt
 ├── .env.example
 ├── data/
-│   ├── employee_data.csv   # 15 sample employees
-│   └── policies/           # leave_policy / benefits_handbook / onboarding_guide (.txt)
+│   └── employee_data.csv   # 15 sample employees (policy docs come from PDF upload)
 └── src/
     ├── llm.py              # OpenRouter provider layer (chat + tool calling + fallback)
     ├── rag.py              # FAISS RAG pipeline
@@ -131,11 +132,12 @@ dependencies, and a committed `.streamlit/config.toml`.
    OPENROUTER_API_KEY = "sk-or-your-key-here"
    ```
    (`config.py` reads `st.secrets` automatically when no env var is present.)
-5. Click **Deploy**. First launch downloads the embedding model (~90 MB) and
-   indexes the bundled policy documents — subsequent loads are fast (cached).
+5. Click **Deploy**. First launch downloads the embedding model (~90 MB);
+   subsequent loads are fast (cached).
+6. In the running app, **upload a policy PDF** in the sidebar to enable RAG.
 
-**Verify after deploy:** ask one question of each type to confirm all three
-routes work:
+**Verify after deploy:** upload a PDF, then ask one question of each type to
+confirm all three routes work:
 - "What is the maternity leave policy?" → `RAG_ONLY`
 - "What is E001's leave balance?" → `DB_ONLY`
 - "Maternity policy and how many leaves does E001 have left?" → `HYBRID`

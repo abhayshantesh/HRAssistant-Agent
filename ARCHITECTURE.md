@@ -80,12 +80,14 @@ functional even when a free model is rate-limited.
 
 ```
 Document  →  Chunk  →  Embed  →  FAISS  →  Retrieve  →  LLM answer
-(.txt/.pdf)  (recursive   (all-MiniLM   (in-memory   (top-k,
-             splitter)    -L6-v2, CPU)   index)       k=4)
+(PDF        (recursive   (all-MiniLM   (in-memory   (top-k,
+ upload)     splitter)    -L6-v2, CPU)   index)       k=4)
 ```
 
 - Embeddings are generated **locally** — no embedding API key required.
-- Default policy docs are indexed on first load; users can upload more `.txt`/`.pdf`.
+- The index starts **empty**; users upload **PDF** policy documents in the
+  sidebar to populate it. Policy (RAG) answers are unavailable until at least
+  one document is indexed; employee-record answers work regardless.
 - Retrieved chunks carry their `source` filename for citation.
 
 ---
@@ -126,7 +128,7 @@ code, not by the model.
 ```
 employee_data.csv ──► EmployeeDB ──► tools ──┐
                                              ├─► synthesis ─► cited answer
-policies/*.txt ──► chunk ──► FAISS ──► chunks┘
+uploaded PDFs ──► chunk ──► FAISS ──► chunks┘
                               ▲
                      local MiniLM embeddings
 ```
